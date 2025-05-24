@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="welcome-container fade-in">
+    <div class="welcome-icon">
+        <i class="fas fa-images"></i>
+    </div>
+    <h1 class="welcome-title">Welcome to Image Categorizer</h1>
+    <p class="welcome-subtitle">A simple tool to categorize your images using AI</p>
+    
+    {% if is_first_run %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle me-2"></i>This appears to be your first time using the application. Let's get you set up!
+    </div>
+    {% endif %}
+    
+    <div class="row mt-5">
+        <div class="col-md-8 offset-md-2">
+            <div class="welcome-step">
+                <h4><span class="welcome-step-number">1</span> Set Up Your API Key</h4>
+                <p>You'll need an OpenAI API key to use this tool. The API key is used to analyze and categorize your images.</p>
+                
+                {% if has_api_key %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>You've already set up your API key. Great!
+                </div>
+                {% else %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>You need to set up your OpenAI API key first.
+                </div>
+                <a href="/settings" class="btn btn-primary mt-2">
+                    <i class="fas fa-key me-2"></i>Set Up API Key
+                </a>
+                {% endif %}
+            </div>
+            
+            <div class="welcome-step">
+                <h4><span class="welcome-step-number">2</span> Prepare Your CSV File</h4>
+                <p>You'll need a CSV file with image URLs to categorize. The file should have at least one column for the image URL.</p>
+                <button id="get_sample_btn" class="btn btn-secondary mt-2">
+                    <i class="fas fa-download me-2"></i>Get Sample CSV
+                </button>
+            </div>
+            
+            <div class="welcome-step">
+                <h4><span class="welcome-step-number">3</span> Select Categories</h4>
+                <p>You can select categories to apply to all images. This is useful for common categories that apply to most of your images.</p>
+                <img src="{{ url_for('static', filename='img/category_selection.png') }}" alt="Category Selection" class="img-fluid mt-2 rounded" style="max-height: 200px;">
+            </div>
+            
+            <div class="welcome-step">
+                <h4><span class="welcome-step-number">4</span> Process Images</h4>
+                <p>Once you're set up, you can start processing images. The tool will analyze each image and apply the categories you've selected.</p>
+            </div>
+            
+            <div class="d-grid gap-2 col-md-6 mx-auto mt-5">
+                <a href="/" class="btn btn-primary btn-lg">
+                    <i class="fas fa-rocket me-2"></i>Get Started
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Handle the sample CSV button
+        $('#get_sample_btn').click(function() {
+            $.getJSON('/sample_data', function(data) {
+                if (data.sample_file) {
+                    alert('Sample CSV file created at: ' + data.sample_file);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

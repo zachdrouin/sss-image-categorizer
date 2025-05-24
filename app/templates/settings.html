@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="fas fa-cog me-2"></i>Settings</h4>
+            </div>
+            <div class="card-body">
+                <form action="/settings" method="post">
+                    <div class="mb-4">
+                        <label for="api_key" class="form-label"><i class="fas fa-key me-2"></i>OpenAI API Key:</label>
+                        <div class="input-group mb-2">
+                            <input type="password" class="form-control" id="api_key" name="api_key" value="{{ api_key or '' }}">
+                            <button class="btn btn-outline-secondary" type="button" id="toggle_key_btn">
+                                <i class="fas fa-eye" id="show_eye"></i>
+                                <i class="fas fa-eye-slash" id="hide_eye" style="display: none;"></i>
+                            </button>
+                        </div>
+                        <div class="form-text text-muted">
+                            <i class="fas fa-shield-alt me-1"></i> Your API key is stored securely in your system's keychain.
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i> The API key is required for image analysis. You can get an API key from <a href="https://platform.openai.com/api-keys" target="_blank" class="alert-link">OpenAI's website</a>.
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-save me-2"></i>Save API Key
+                        </button>
+                    </div>
+                    
+                    <!-- Hidden input to track active tab -->
+                    <input type="hidden" name="active_tab" id="active_tab" value="settings">
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Toggle password visibility
+        $('#toggle_key_btn').click(function() {
+            var apiKeyInput = $('#api_key');
+            var showEye = $('#show_eye');
+            var hideEye = $('#hide_eye');
+            
+            if (apiKeyInput.attr('type') === 'password') {
+                apiKeyInput.attr('type', 'text');
+                showEye.hide();
+                hideEye.show();
+            } else {
+                apiKeyInput.attr('type', 'password');
+                showEye.show();
+                hideEye.hide();
+            }
+        });
+        
+        // Store current page in session storage to preserve context
+        sessionStorage.setItem('lastPage', window.location.pathname);
+        
+        // Add event listeners to nav links to store the active tab
+        $('.nav-link').on('click', function() {
+            sessionStorage.setItem('activeTab', $(this).attr('href'));
+        });
+    });
+</script>
+{% endblock %}
