@@ -387,80 +387,125 @@ def get_progress():
     global progress
     return jsonify(progress)
 
-@app.route('/browse_input', methods=['POST'])
-def browse_input():
-    """Browse for input file"""
+@app.route('/browse', methods=['GET'])
+def browse():
+    """Browse for input or output file"""
     try:
-        # Use a system dialog instead of Tkinter to avoid threading issues
-        import subprocess
-        import platform
-        import tempfile
-        
-        if platform.system() == 'Darwin':  # macOS
-            # Create a temporary AppleScript file
-            with tempfile.NamedTemporaryFile(suffix='.applescript', delete=False) as script_file:
-                script = '''
-                set theFile to choose file with prompt "Select Input CSV File" of type {"csv"}
-                set thePath to POSIX path of theFile
-                return thePath
-                '''
-                script_file.write(script.encode('utf-8'))
-                script_path = script_file.name
+        browse_type = request.args.get('type', 'input')
+        if browse_type == 'input':
+            return browse_input_internal()
+        elif browse_type == 'output':
+            return browse_output_internal()
+        else:
+            return jsonify({"error": "Invalid browse type"})
+    except Exception as e:
+        logger.error(f"Error in browse: {str(e)}")
+        return jsonify({"error": str(e)})
+
+# Lock to prevent multiple file dialogs from appearing simultaneously
+import threading
+file_dialog_lock = threading.Lock()
+
+def browse_input_internal():
+    """Internal function to browse for input file"""
+    try:
+        # Use a lock to prevent multiple dialogs
+        if not file_dialog_lock.acquire(blocking=False):
+            logger.warning("File dialog already in progress, ignoring duplicate request")
+            return jsonify({"error": "File dialog already in progress"})
             
-            # Run the AppleScript
-            result = subprocess.run(['osascript', script_path], capture_output=True, text=True)
-            os.unlink(script_path)  # Delete the temporary file
+        try:
+            # Use a system dialog instead of Tkinter to avoid threading issues
+            import subprocess
+            import platform
+            import tempfile
             
-            input_file = result.stdout.strip()
-            
-            if input_file:
-                # Auto-generate output filename
-                input_path = Path(input_file)
-                output_file = str(input_path.with_name(f"{input_path.stem}_categorized{input_path.suffix}"))
+            if platform.system() == 'Darwin':  # macOS
+                # Create a temporary AppleScript file
+                with tempfile.NamedTemporaryFile(suffix='.applescript', delete=False) as script_file:
+                    script = '''
+                    set theFile to choose file with prompt "Select Input CSV File" of type {"csv"}
+                    set thePath to POSIX path of theFile
+                    return thePath
+                    '''
+                    script_file.write(script.encode('utf-8'))
+                    script_path = script_file.name
                 
-                return jsonify({"input_file": input_file, "output_file": output_file})
+                # Run the AppleScript
+                result = subprocess.run(['osascript', script_path], capture_output=True, text=True)
+                os.unlink(script_path)  # Delete the temporary file
+                
+                input_file = result.stdout.strip()
+                
+                if input_file:
+                    # Auto-generate output filename
+                    input_path = Path(input_file)
+                    output_file = str(input_path.with_name(f"{input_path.stem}_categorized{input_path.suffix}"))
+                    
+                    return jsonify({"path": input_file, "output_file": output_file})
+        finally:
+            # Always release the lock
+            file_dialog_lock.release()
         
         return jsonify({})
     except Exception as e:
-        logger.error(f"Error in browse_input: {str(e)}")
+        logger.error(f"Error in browse_input_internal: {str(e)}")
+        return jsonify({"error": str(e)})
+
+@app.route('/browse_input', methods=['POST'])
+def browse_input():
+    """Browse for input file (legacy route)"""
+    return browse_input_internal()
+
+def browse_output_internal():
+    """Internal function to browse for output file"""
+    try:
+        # Use a lock to prevent multiple dialogs
+        if not file_dialog_lock.acquire(blocking=False):
+            logger.warning("File dialog already in progress, ignoring duplicate request")
+            return jsonify({"error": "File dialog already in progress"})
+            
+        try:
+            # Use a system dialog instead of Tkinter to avoid threading issues
+            import subprocess
+            import platform
+            import tempfile
+            
+            if platform.system() == 'Darwin':  # macOS
+                # Create a temporary AppleScript file
+                with tempfile.NamedTemporaryFile(suffix='.applescript', delete=False) as script_file:
+                    script = '''
+                    set theFile to choose file name with prompt "Save As" default name "categorized_output.csv"
+                    set thePath to POSIX path of theFile
+                    return thePath
+                    '''
+                    script_file.write(script.encode('utf-8'))
+                    script_path = script_file.name
+                
+                # Run the AppleScript
+                result = subprocess.run(['osascript', script_path], capture_output=True, text=True)
+                os.unlink(script_path)  # Delete the temporary file
+                
+                output_file = result.stdout.strip()
+                
+                if output_file:
+                    # Ensure the file has a .csv extension
+                    if not output_file.lower().endswith('.csv'):
+                        output_file += '.csv'
+                    return jsonify({"path": output_file})
+        finally:
+            # Always release the lock
+            file_dialog_lock.release()
+        
+        return jsonify({})
+    except Exception as e:
+        logger.error(f"Error in browse_output_internal: {str(e)}")
         return jsonify({"error": str(e)})
 
 @app.route('/browse_output', methods=['POST'])
 def browse_output():
-    """Browse for output file"""
-    try:
-        # Use a system dialog instead of Tkinter to avoid threading issues
-        import subprocess
-        import platform
-        import tempfile
-        
-        if platform.system() == 'Darwin':  # macOS
-            # Create a temporary AppleScript file
-            with tempfile.NamedTemporaryFile(suffix='.applescript', delete=False) as script_file:
-                script = '''
-                set theFile to choose file name with prompt "Save As" default name "categorized_output.csv"
-                set thePath to POSIX path of theFile
-                return thePath
-                '''
-                script_file.write(script.encode('utf-8'))
-                script_path = script_file.name
-            
-            # Run the AppleScript
-            result = subprocess.run(['osascript', script_path], capture_output=True, text=True)
-            os.unlink(script_path)  # Delete the temporary file
-            
-            output_file = result.stdout.strip()
-            
-            if output_file:
-                # Ensure the file has a .csv extension
-                if not output_file.lower().endswith('.csv'):
-                    output_file += '.csv'
-                return jsonify({"output_file": output_file})
-        
-        return jsonify({})
-    except Exception as e:
-        logger.error(f"Error in browse_output: {str(e)}")
-        return jsonify({"error": str(e)})
+    """Browse for output file (legacy route)"""
+    return browse_output_internal()
 
 def create_templates_folder():
     """Ensure the templates folder exists"""
@@ -474,6 +519,59 @@ def create_templates_folder():
         os.makedirs(static_dir, exist_ok=True)
 
 # Welcome route is already defined above
+
+# Add a route for applying categories to all images
+@app.route('/apply_categories_to_all', methods=['POST'])
+def apply_categories_to_all():
+    """Apply selected categories to all images in the input file"""
+    try:
+        data = request.json
+        categories = data.get('categories', [])
+        input_file = data.get('input_file', '')
+        
+        if not categories:
+            return jsonify({"success": False, "message": "No categories selected"})
+            
+        if not input_file or not os.path.exists(input_file):
+            return jsonify({"success": False, "message": "Input file not found"})
+            
+        # Load the CSV file
+        df = pd.read_csv(input_file)
+        
+        # Check if the 'categories' column exists
+        if 'categories' not in df.columns:
+            df['categories'] = ''
+            
+        # Apply the selected categories to all rows
+        for index, row in df.iterrows():
+            current_categories = row['categories']
+            
+            # Parse existing categories if they exist
+            existing_categories = []
+            if current_categories and isinstance(current_categories, str):
+                try:
+                    existing_categories = json.loads(current_categories)
+                except:
+                    # If not valid JSON, treat as comma-separated list
+                    existing_categories = [c.strip() for c in current_categories.split(',') if c.strip()]
+            
+            # Add new categories, avoiding duplicates
+            for category in categories:
+                if category not in existing_categories:
+                    existing_categories.append(category)
+            
+            # Update the categories column
+            df.at[index, 'categories'] = json.dumps(existing_categories)
+        
+        # Save the updated CSV file
+        df.to_csv(input_file, index=False)
+        
+        logger.info(f"Applied {len(categories)} categories to all images in {input_file}")
+        return jsonify({"success": True, "message": f"Applied {len(categories)} categories to all images"})
+        
+    except Exception as e:
+        logger.error(f"Error applying categories to all images: {str(e)}")
+        return jsonify({"success": False, "message": str(e)})
 
 # Add a route for sample data
 @app.route('/sample_data')

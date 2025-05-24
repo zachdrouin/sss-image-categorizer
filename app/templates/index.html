@@ -74,6 +74,12 @@
                                 <div class="card-body">
                                     <p class="mb-3">Click on categories to select them. <span id="selected_count" class="badge bg-primary">0</span> categories selected.</p>
                                     
+                                    <div class="category-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary select-all-btn" id="select_all_btn"><i class="fas fa-check-square me-1"></i>Select All</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary deselect-all-btn" id="deselect_all_btn"><i class="fas fa-square me-1"></i>Deselect All</button>
+                                        <button type="button" class="btn btn-sm apply-to-all-btn" id="apply_to_all_btn"><i class="fas fa-magic me-1"></i>Apply to All Images</button>
+                                    </div>
+                                    
                                     <div class="category-selections">
                                         <!-- Main Categories -->
                                         {% if categories.main %}
@@ -155,17 +161,12 @@
                         </div>
                     </div>
                     
-                    <!-- Action Buttons -->
-                    <div class="d-grid gap-2 col-md-6 mx-auto">
-                        <button type="submit" class="btn btn-primary btn-lg" id="start_btn">
-                            <i class="fas fa-play me-2"></i>Start Processing
-                        </button>
-                        <button type="button" class="btn btn-danger btn-lg" id="stop_btn" style="display: none;">
-                            <i class="fas fa-stop me-2"></i>Stop Processing
-                        </button>
-                        <button type="button" class="btn btn-success btn-lg" id="complete_btn" style="display: none;">
-                            <i class="fas fa-check-circle me-2"></i>Processing Complete!
-                        </button>
+                    <div class="row mt-4">
+                        <div class="col-md-12 text-center">
+                            <button type="submit" class="btn btn-primary btn-lg slide-in-up" id="start_btn"><i class="fas fa-play me-2"></i>Start Processing</button>
+                            <button type="button" class="btn btn-danger btn-lg" id="stop_btn" style="display: none;"><i class="fas fa-stop me-2"></i>Stop Processing</button>
+                            <button type="button" class="btn btn-success btn-lg" id="complete_btn" style="display: none;"><i class="fas fa-check me-2"></i>Complete</button>
+                        </div>
                     </div>
                     
                     <!-- Hidden input to track active tab -->
@@ -187,36 +188,247 @@
 {% block scripts %}
 <script>
     $(document).ready(function() {
-        // Browse buttons functionality
-        $('#browse_input_btn').click(function() {
-            $.get('/browse?type=input', function(data) {
-                if (data.path) {
-                    $('#input_file').val(data.path);
-                }
-            });
+        // Browse buttons functionality with debounce to prevent multiple dialogs
+        let browseInputInProgress = false;
+        $(document).off('click', '#browse_input_btn').on('click', '#browse_input_btn', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (browseInputInProgress) return;
+            browseInputInProgress = true;
+            
+            $.get('/browse?type=input')
+                .done(function(data) {
+                    if (data && data.path) {
+                        $('#input_file').val(data.path);
+                    }
+                })
+                .fail(function() {
+                    console.error('Failed to browse for input directory');
+                })
+                .always(function() {
+                    setTimeout(function() {
+                        browseInputInProgress = false;
+                    }, 1000); // Prevent another click for 1 second
+                });
         });
         
-        $('#browse_output_btn').click(function() {
-            $.get('/browse?type=output', function(data) {
-                if (data.path) {
-                    $('#output_file').val(data.path);
+        let browseOutputInProgress = false;
+        $(document).off('click', '#browse_output_btn').on('click', '#browse_output_btn', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (browseOutputInProgress) return;
+            browseOutputInProgress = true;
+            
+            $.get('/browse?type=output')
+                .done(function(data) {
+                    if (data && data.path) {
+                        $('#output_file').val(data.path);
+                    }
+                })
+                .fail(function() {
+                    console.error('Failed to browse for output directory');
+                })
+                .always(function() {
+                    setTimeout(function() {
+                        browseOutputInProgress = false;
+                    }, 1000); // Prevent another click for 1 second
+                });
+        });
+        
+        // Form submission handler
+        $('form').on('submit', function(e) {
+            e.preventDefault();
+            
+            // Update the hidden input with the current selection before submitting
+            const selectedCategories = updateSelectedCategories();
+            
+            // Validate that we have at least one category selected
+            if (selectedCategories.length === 0) {
+                alert('Please select at least one category to process.');
+                return false;
+            }
+            
+            // Show processing state
+            const $submitBtn = $('#start_btn');
+            const originalBtnText = $submitBtn.html();
+            $submitBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...');
+            
+            // Submit the form via AJAX to handle the response
+            const formData = new FormData(this);
+            
+            $.ajax({
+                url: $(this).attr('action'),
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    if (response.redirect) {
+                        window.location.href = response.redirect;
+                    } else if (response.error) {
+                        alert('Error: ' + response.error);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error:', error);
+                    alert('An error occurred while processing your request. Please try again.');
+                },
+                complete: function() {
+                    $submitBtn.html(originalBtnText).prop('disabled', false);
                 }
             });
+            
+            return false;
         });
         
         // Category selection functionality
         $('.category-badge').click(function() {
+            const $this = $(this);
+            const category = $this.data('category');
+            const isSelected = $this.hasClass('selected');
+            
+            // Toggle the clicked category
+            $this.toggleClass('selected');
+            
+            // Check if this is an age category
+            if (category.startsWith('PEOPLE > Any Age >')) {
+                // Deselect all other age categories first
+                $('.category-badge').each(function() {
+                    const $other = $(this);
+                    const otherCategory = $other.data('category');
+                    if (otherCategory.startsWith('PEOPLE > Any Age >') && otherCategory !== category) {
+                        $other.removeClass('selected');
+                    }
+                });
+            }
+            // Check if this is an ethnicity category
+            else if (category.startsWith('PEOPLE > Any Ethnicity >')) {
+                // Deselect all other ethnicity categories first
+                $('.category-badge').each(function() {
+                    const $other = $(this);
+                    const otherCategory = $other.data('category');
+                    if (otherCategory.startsWith('PEOPLE > Any Ethnicity >') && otherCategory !== category) {
+                        $other.removeClass('selected');
+                    }
+                });
+            }
+            
+            // Toggle the selected state of this category
             $(this).toggleClass('selected');
             updateSelectedCategories();
         });
         
-        function updateSelectedCategories() {
-            var selected = [];
-            $('.category-badge.selected').each(function() {
-                selected.push($(this).data('category'));
+        // Select all categories
+        $('#select_all_btn').click(function() {
+            // First deselect all categories
+            $('.category-badge').removeClass('selected');
+            
+            // Select one from each exclusive category group (first one in each group)
+            let ageSelected = false;
+            let ethnicitySelected = false;
+            
+            // Select all non-exclusive categories and first of each exclusive group
+            $('.category-badge').each(function() {
+                const category = $(this).data('category');
+                
+                // Handle age categories (select only the first one)
+                if (category.startsWith('PEOPLE > Any Age >')) {
+                    if (!ageSelected) {
+                        $(this).addClass('selected');
+                        ageSelected = true;
+                    }
+                }
+                // Handle ethnicity categories (select only the first one)
+                else if (category.startsWith('PEOPLE > Any Ethnicity >')) {
+                    if (!ethnicitySelected) {
+                        $(this).addClass('selected');
+                        ethnicitySelected = true;
+                    }
+                }
+                // Select all other categories
+                else {
+                    $(this).addClass('selected');
+                }
             });
-            $('#selected_categories').val(JSON.stringify(selected));
+            
+            updateSelectedCategories();
+        });
+        
+        // Deselect all categories
+        $('#deselect_all_btn').click(function() {
+            $('.category-badge').removeClass('selected');
+            updateSelectedCategories();
+        });
+        
+        // Apply selected categories to all images
+        $('#apply_to_all_btn').click(function() {
+            const selectedCategories = [];
+            $('.category-badge.selected').each(function() {
+                selectedCategories.push($(this).data('category'));
+            });
+            
+            if (selectedCategories.length === 0) {
+                alert('Please select at least one category to apply to all images.');
+                return;
+            }
+            
+            // Show confirmation with the number of selected categories
+            if (confirm(`Are you sure you want to apply ${selectedCategories.length} selected categories to all images in the input file?`)) {
+                // Visual feedback
+                const $btn = $(this);
+                const originalText = $btn.html();
+                $btn.html('<i class="fas fa-spinner fa-spin me-1"></i>Processing...');
+                $btn.prop('disabled', true);
+                
+                // Send the request to apply categories to all images
+                $.ajax({
+                    url: '/apply_categories_to_all',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ categories: selectedCategories, input_file: $('#input_file').val() }),
+                    success: function(response) {
+                        if (response.success) {
+                            // Show success message
+                            alert(`Successfully applied ${selectedCategories.length} categories to all images in the file.`);
+                        } else {
+                            // Show error message
+                            alert('Error: ' + response.message);
+                        }
+                    },
+                    error: function() {
+                        alert('An error occurred while applying categories to all images.');
+                    },
+                    complete: function() {
+                        // Reset button
+                        $btn.html(originalText);
+                        $btn.prop('disabled', false);
+                    }
+                });
+            }
+        });
+        
+        function updateSelectedCategories() {
+            const selected = [];
+            $('.category-badge.selected').each(function() {
+                const category = $(this).data('category');
+                if (category) {
+                    selected.push(category);
+                }
+            });
+            
+            // Update the hidden input with a JSON string of selected categories
+            const selectedJson = JSON.stringify(selected);
+            $('#selected_categories').val(selectedJson);
+            
+            // Update the selected count
             $('#selected_count').text(selected.length);
+            
+            // Log for debugging
+            console.log('Selected categories updated:', selected);
+            
+            return selected;
         }
         
         // Stop button functionality
@@ -271,6 +483,15 @@
         setInterval(checkProgress, 2000);
         checkProgress(); // Check immediately on page load
         
+        // Add tooltips to buttons
+        $('[data-toggle="tooltip"]').tooltip();
+        
+        // Add a subtle animation to the cards on page load
+        $('.card').each(function(index) {
+            $(this).css('animation-delay', (index * 0.1) + 's');
+            $(this).addClass('slide-in-up');
+        });
+        
         // Store current page in session storage to preserve context
         sessionStorage.setItem('lastPage', window.location.pathname);
         
@@ -278,6 +499,20 @@
         $('.nav-link').on('click', function() {
             sessionStorage.setItem('activeTab', $(this).attr('href'));
         });
+        
+        // Check if input file is selected before enabling the apply button
+        $('#input_file').on('change', function() {
+            if ($(this).val()) {
+                $('#apply_to_all_btn').prop('disabled', false);
+            } else {
+                $('#apply_to_all_btn').prop('disabled', true);
+            }
+        });
+        
+        // Initialize the apply button state
+        if (!$('#input_file').val()) {
+            $('#apply_to_all_btn').prop('disabled', true);
+        }
     });
 </script>
 {% endblock %}
