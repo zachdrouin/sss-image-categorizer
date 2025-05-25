@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-123456789",
+  "object": "chat.completion",
+  "created": 1677858242,
+  "model": "gpt-4-vision-preview",
+  "usage": {
+    "prompt_tokens": 1450,
+    "completion_tokens": 120,
+    "total_tokens": 1570
+  },
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "Based on analyzing this image, I would categorize it with the following tags:\n\n1. Category > Nature + Landscapes\n2. ORIENTATION > Horizontal\n3. Colors > Blue\n4. Colors > Green\n5. PEOPLE > No People\n6. Copy Space > Large\n\nThe image appears to be a scenic landscape with natural elements, presented in a horizontal orientation with prominent blue and green colors. There are no people visible, and it has ample space for copy text overlay."
+      },
+      "finish_reason": "stop",
+      "index": 0
+    }
+  ]
+}

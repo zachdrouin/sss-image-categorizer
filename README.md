@@ -1,166 +1,163 @@
 # Image Categorizer
 
-A powerful AI-driven tool to automatically categorize your images using OpenAI's GPT-4 Vision API.
+A user-friendly tool for categorizing images using OpenAI's GPT-4 Vision API. Perfect for non-technical users who need to categorize images for WooCommerce import.
 
-## Getting Started
+## Features
 
-### Installation
+- Automatically analyze images using AI to assign appropriate categories
+- Web-based interface for easy use by non-technical users
+- Bulk categorization support for multiple images
+- Apply common categories to all images at once
+- Resume interrupted processing
+- CSV import and export compatible with WooCommerce
 
-No installation required! Just double-click the `ImageCategorizer.command` file to start the application.
+## Installation
 
-### First Time Setup
+1. Clone this repository:
+```
+git clone <repository-url>
+cd image-categorizer
+```
 
-1. **API Key**: The first time you run the application, you'll need to set up your OpenAI API key.
-   - You can get an API key from [OpenAI's website](https://platform.openai.com/api-keys)
-   - Enter your API key in the Settings page
+2. Create and activate a virtual environment:
+```
+python -m venv venv
+source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+```
 
-2. **Sample Data**: Use the "Get Sample CSV" button on the welcome page to create a sample CSV file with image URLs.
+3. Install dependencies:
+```
+pip install -r requirements.txt
+```
 
-## How to Use
+## Usage
 
-### Step 1: Prepare Your CSV File
+### Web Interface (Recommended for non-technical users)
 
-Your CSV file should contain a column with image URLs. The application will analyze these images and categorize them automatically.
+To start the web interface:
 
-**Required columns:**
-- A column containing image URLs (can be named anything like "Images", "image_url", etc.)
+```
+python app/web_categorizer.py
+```
 
-**Optional columns:**
-- `Description`: Text descriptions that help improve categorization accuracy
-- Any other data you want to preserve
+This will open a browser window with the application interface. From there, you can:
+1. Provide your OpenAI API key
+2. Select your input CSV file
+3. Choose where to save the output file
+4. Configure processing options
+5. Start the categorization process
 
-### Step 2: Select Categories to Apply to All Images (Optional)
+### Command Line Interface
 
-Before processing, you can select common categories that apply to most of your images. This feature:
-- **Saves time**: Apply bulk categories instantly without AI processing
-- **Ensures consistency**: Guarantees certain categories are applied to all images
-- **Reduces API costs**: Less reliance on AI for obvious categories
+For advanced users who prefer the command line:
 
-**Available Category Groups:**
+```
+python app/image_categorizer.py --input your_input.csv --output your_output.csv [options]
+```
 
-#### Main Categories
-- Workspace, Lifestyle, Parenting + Motherhood
-- Fall + Winter, Spring + Summer
-- Fashion + Beauty, Flowers + Greenery
-- Food + Beverage, Health + Fitness
-- Home + Interiors, Nature + Landscapes
-- Holidays, Travel, Weddings + Celebrations
-- Self-Care + Wellness, Mockups
+Options:
+- `--batch-size N`: Number of images to process in each batch (default: 5)
+- `--start-row N`: Row to start processing from (useful for resuming) (default: 0)
+- `--api-key KEY`: Your OpenAI API key (can also be set as OPENAI_API_KEY environment variable)
+- `--mock`: Run in mock mode without making API calls (for testing)
 
-#### Colors
-- All major colors: Black, Blue, Brown, Gold, Gray, Green, Orange, Peach, Purple, Red, Rose Gold, Silver, Dark Brown, Tan, Turquoise, White, Yellow
+## Category Reference
 
-#### People Categories
-- **Presence**: No People, Faceless, Any People
-- **Count**: 2 People, 3+ People
-- **Age Groups**: <20, 20s, 30s, 40s, 50s, 60+
-- **Ethnicity**: Asian, Black/African American, Hispanic/Latino, Indigenous/Native American, Multiracial, White/Caucasian
+The categorizer supports the following category groups:
 
-#### Technical Categories
-- **Orientation**: Horizontal, Vertical
-- **Mockups**: Computer, Frame, Mug, Phone, Stationery, Tablet, Other
-- **Copy Space**: Large, Small
+### Main Categories
+- Workspace, Lifestyle, Parenting + Motherhood, Fall + Winter
+- Fashion + Beauty, Flowers + Greenery, Food + Beverage
+- Health + Fitness, Home + Interiors, Mockups
+- Nature + Landscapes, Holidays, Travel
+- Weddings + Celebrations, Self-Care + Wellness, Spring + Summer
 
-### Step 3: Process Images
+### Colors
+Black, Blue, Light Blue, Dark Blue, Coral, Cream, Gold, Gray, Green,
+Dark Green, Light Pink, Bright Pink, Rose Pink, Orange, Peach,
+Purple, Red, Rose Gold, Silver, Dark Brown, Tan, Turquoise, White, Yellow
 
-1. **Select Input File**: Click "Browse" to select your CSV file
-2. **Choose Output Location**: Specify where to save the categorized results
-3. **Configure Settings**:
-   - **Batch Size**: Number of images to process at once (default: 5)
-   - **Start Row**: Resume processing from a specific row if interrupted
-   - **Mock Mode**: Test the interface without making API calls
-4. **Start Processing**: Click "Start Processing" to begin AI categorization
+### People Categories
+- No People, Faceless
+- Age groups: <20, 20s, 30s, 40s, 50s, 60+
+- Group size: Single, 2 People, 3+ People
+- Ethnicity: Asian, Black/African American, Hispanic/Latina/o, Indigenous/Native American, Multiracial, White/Caucasian
 
-### Step 4: Monitor Progress
+### Technical Categories
+- Orientation: Horizontal, Vertical
+- Mockups: Computer, Frame, Mug, Phone, Stationery, Tablet, Other
+- Copy Space: Large, Small
 
-- Real-time progress updates show current status
-- Processing can be stopped and resumed at any time
-- Results are saved incrementally to prevent data loss
+## Bulk Category Application
 
-### Step 5: View Results
+The web interface allows you to select categories to apply to all images in your CSV. This is useful for:
+- Adding common categories (like your brand style)
+- Applying seasonal categories to entire collections
+- Setting technical aspects that apply to all images (orientation, copy space)
 
-Your output CSV file will contain:
-- All original data from your input file
-- New `Categories` column with AI-generated categories
-- Categories are stored as comma-separated values for easy filtering
+## Development
 
-## Advanced Features
+### Project Structure
 
-### Bulk Category Application
+```
+image-categorizer/
+├── app/                    # Application code
+│   ├── image_categorizer.py  # CLI application
+│   ├── web_categorizer.py    # Web interface
+│   ├── static/               # CSS, JS files
+│   └── templates/            # HTML templates
+├── config/                 # Configuration
+│   ├── settings.py           # Global settings
+│   ├── category_manager.py   # Category handling
+│   └── categories.json       # Category definitions
+├── tests/                  # Test suite
+│   ├── unit/                 # Unit tests
+│   ├── integration/          # Integration tests
+│   └── fixtures/             # Test data
+├── data/                   # Sample data directory
+├── venv/                   # Virtual environment
+├── requirements.txt        # Dependencies
+├── pytest.ini              # Test configuration
+└── run_tests.py            # Test runner
+```
 
-Use the "Apply Categories to All" feature to:
-1. Select multiple categories from organized groups
-2. Apply them instantly to all images in your CSV
-3. Combine with AI processing for comprehensive categorization
+### Running Tests
 
-### Smart Category Processing
+To run the test suite:
 
-The AI system:
-- **Analyzes visual content** using GPT-4 Vision
-- **Considers descriptions** when available for better accuracy
-- **Avoids duplicates** when combining bulk and AI categories
-- **Uses hierarchical categories** for precise classification
+```
+./run_tests.py
+```
 
-### Resume Processing
+For specific test groups:
 
-If processing is interrupted:
-1. Note the last processed row number
-2. Enter it in the "Start Row" field
-3. Resume processing from that point
+```
+./run_tests.py tests/unit        # Run only unit tests
+./run_tests.py tests/integration  # Run only integration tests
+```
 
-## Tips for Best Results
+### Extending Categories
 
-### CSV File Preparation
-- **Use high-quality image URLs** that are publicly accessible
-- **Include descriptions** when possible for better categorization
-- **Ensure URLs are valid** and images load properly
-
-### Category Selection Strategy
-- **Apply obvious categories first** using bulk selection
-- **Use specific categories** rather than general ones when possible
-- **Consider your end use** - select categories that match your workflow
-
-### Processing Optimization
-- **Start with small batches** (5-10 images) to test
-- **Use mock mode** to familiarize yourself with the interface
-- **Monitor API usage** to manage costs effectively
-- **Process during off-peak hours** for faster response times
-
-### Error Prevention
-- **Save your work frequently** - results are auto-saved after each image
-- **Keep backup copies** of your original CSV files
-- **Test with sample data** before processing large datasets
+To add or modify categories, edit the `config/categories.json` file. Changes will be automatically loaded the next time you run the application.
 
 ## Troubleshooting
 
-### Common Issues
-- **API Key Errors**: Verify your OpenAI API key is valid and has sufficient credits
-- **Image Loading Failures**: Check that image URLs are accessible and properly formatted
-- **Processing Interruptions**: Use the "Start Row" feature to resume from where you left off
+### API Key Issues
+- Ensure your OpenAI API key has access to the GPT-4 Vision API
+- Check that your account has sufficient credits
+
+### CSV Format
+- The input CSV must have an 'Images' column with image URLs
+- Optionally include a 'Description' column for better categorization
+- The 'Categories' column will be created or updated by the tool
 
 ### Performance Tips
-- **Reduce batch size** if experiencing timeouts
-- **Check internet connection** for stable processing
-- **Close other applications** to free up system resources
+- Process in smaller batches to avoid timeouts
+- Use the resume feature for large datasets
+- For very large datasets, consider running overnight
 
-## Technical Details
+## Requirements
 
-### Supported Formats
-- **Input**: CSV files with image URLs
-- **Images**: Any format supported by web browsers (JPG, PNG, GIF, etc.)
-- **Output**: CSV files with added categorization data
-
-### API Requirements
+- Python 3.8+
 - OpenAI API key with GPT-4 Vision access
-- Stable internet connection
-- Sufficient API credits for your image volume
-
-## Need Help?
-
-If you encounter any issues or need assistance:
-1. Check the application logs for detailed error messages
-2. Verify your API key and internet connection
-3. Try processing a smaller batch to isolate issues
-4. Contact support with specific error details
-
-Happy categorizing! 🎯📸
+- Internet connection for API calls and image access

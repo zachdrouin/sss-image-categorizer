@@ -12,12 +12,12 @@ from pathlib import Path
 import sys
 import random
 
+# Import from configuration module
+from config.settings import setup_logging
+from config.category_manager import category_manager
+
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 # Initialize OpenAI client - will be set in main function
 client = None
@@ -26,54 +26,8 @@ client = None
 MOCK_MODE = False
 STOP_PROCESSING = False
 
-# Define all valid categories
-VALID_CATEGORIES = {
-    # Main Categories
-    'Category > Workspace',
-    'Category > Lifestyle',
-    'Category > Parenting + Motherhood',
-    'Category > Fall + Winter',
-    'Category > Fashion + Beauty',
-    'Category > Flowers + Greenery',
-    'Category > Food + Beverage',
-    'Category > Health + Fitness',
-    'Category > Home + Interiors',
-    'Category > Mockups',
-    'Category > Nature + Landscapes',
-    'Category > Holidays',
-    'Category > Travel',
-    'Category > Weddings + Celebrations',
-    'Category > Self-Care + Wellness',
-    'Category > Spring + Summer',
-    
-    # Colors
-    'Colors > Black', 'Colors > Blue', 'Colors > Light Blue', 'Colors > Dark Blue',
-    'Colors > Coral', 'Colors > Cream', 'Colors > Gold', 'Colors > Gray', 'Colors > Green',
-    'Colors > Dark Green', 'Colors > Light Pink', 'Colors > Bright Pink', 'Colors > Rose Pink',
-    'Colors > Orange', 'Colors > Peach', 'Colors > Purple', 'Colors > Red', 'Colors > Rose Gold',
-    'Colors > Silver', 'Colors > Dark Brown', 'Colors > Tan', 'Colors > Turquoise', 'Colors > White',
-    'Colors > Yellow',
-    
-    # Mockups
-    'MOCKUPS > Computer', 'MOCKUPS > Frame', 'MOCKUPS > Mug', 'MOCKUPS > Other',
-    'MOCKUPS > Phone', 'MOCKUPS > Stationery', 'MOCKUPS > Tablet',
-    
-    # Orientation
-    'ORIENTATION > Horizontal', 'ORIENTATION > Vertical',
-    
-    # People
-    'PEOPLE > No People', 'PEOPLE > Faceless', 'PEOPLE > Any Age',
-    'PEOPLE > Any Age > < 20', 'PEOPLE > Any Age > 20s', 'PEOPLE > Any Age > 30s',
-    'PEOPLE > Any Age > 40s', 'PEOPLE > Any Age > 50s', 'PEOPLE > Any Age > 60+',
-    'PEOPLE > Any People', 'PEOPLE > Any People > 2 People', 'PEOPLE > Any People > 3+ People',
-    'PEOPLE > Any Ethnicity', 'PEOPLE > Any Ethnicity > Asian',
-    'PEOPLE > Any Ethnicity > Black / African American', 'PEOPLE > Any Ethnicity > Hispanic / Latina/o',
-    'PEOPLE > Any Ethnicity > Indigenous / Native American', 'PEOPLE > Any Ethnicity > Multiracial',
-    'PEOPLE > Any Ethnicity > White / Caucasian',
-    
-    # Copy Space
-    'Copy Space > Large', 'Copy Space > Small'
-}
+# Get valid categories from the category manager
+VALID_CATEGORIES = category_manager.get_all_categories()
 
 def encode_image(image_url: str) -> str:
     """Download and encode image to base64"""
@@ -410,14 +364,21 @@ def process_csv_with_progress(input_file: str, output_file: str, start_row: int 
 def main():
     """Main function to parse arguments and run the script"""
     import argparse
+    from config.settings import load_config
+    
+    # Load configuration
+    config = load_config()
     
     parser = argparse.ArgumentParser(description='Process images and update categories in WooCommerce CSV')
     parser.add_argument('--input', required=True, help='Input CSV file path')
     parser.add_argument('--output', required=True, help='Output CSV file path')
-    parser.add_argument('--batch-size', type=int, default=5, help='Number of images to process in a batch')
-    parser.add_argument('--start-row', type=int, default=0, help='Row number to start processing from (0-based)')
+    parser.add_argument('--batch-size', type=int, default=config.get('batch_size', 5), 
+                        help='Number of images to process in a batch')
+    parser.add_argument('--start-row', type=int, default=0, 
+                        help='Row number to start processing from (0-based)')
     parser.add_argument('--api-key', help='OpenAI API key (overrides environment variable)')
-    parser.add_argument('--mock', action='store_true', help='Run in mock mode without making API calls')
+    parser.add_argument('--mock', action='store_true', 
+                        help='Run in mock mode without making API calls')
     
     args = parser.parse_args()
     
@@ -427,7 +388,7 @@ def main():
     # Configure mock mode and client
     global MOCK_MODE, client
     
-    if args.mock:
+    if args.mock or config.get('mock_mode', False):
         MOCK_MODE = True
         logger.info("Running in MOCK MODE - no API calls will be made")
     elif not api_key:

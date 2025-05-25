@@ -10,7 +10,6 @@ common categories to all images for faster processing.
 import os
 import sys
 import json
-import logging
 import threading
 import pandas as pd
 from pathlib import Path
@@ -20,32 +19,23 @@ import keyring
 import secrets
 import webbrowser
 
-# Add the current directory to the path so we can import the image_categorizer module
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import image_categorizer
+# Add parent directory to path for config imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import configuration modules
+from config.settings import setup_logging, APP_NAME, APP_VERSION, SERVICE_NAME, KEY_NAME, CONFIG_FILE, FIRST_RUN_FLAG, load_config, save_config
+from config.category_manager import category_manager
+
+# Import the image_categorizer module
+try:
+    # Try relative import for when used as a module
+    from . import image_categorizer
+except ImportError:
+    # Fall back to direct import for when run as a script
+    import image_categorizer
 
 # Configure logging
-log_dir = os.path.join(os.path.expanduser("~"), "ImageCategorizerLogs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f"web_categorizer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Constants
-APP_NAME = "Image Categorizer"
-APP_VERSION = "1.0.0"
-SERVICE_NAME = "ImageCategorizerApp"
-KEY_NAME = "OpenAIApiKey"
-CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".image_categorizer_config.json")
-FIRST_RUN_FLAG = os.path.join(os.path.expanduser("~"), ".image_categorizer_first_run")
+logger = setup_logging('web_categorizer')
 
 # Create Flask app
 app = Flask(__name__)
@@ -73,25 +63,7 @@ def save_api_key(api_key):
         logger.error(f"Error saving API key: {str(e)}")
         return False
 
-def load_config():
-    """Load configuration from file"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading config: {str(e)}")
-    return {}
-
-def save_config(config):
-    """Save configuration to file"""
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f)
-        return True
-    except Exception as e:
-        logger.error(f"Error saving config: {str(e)}")
-        return False
+# Note: load_config and save_config are now imported from config.settings
 
 def update_progress(current, total, message=""):
     """Update the progress information"""
@@ -101,96 +73,138 @@ def update_progress(current, total, message=""):
     progress["message"] = message
     logger.info(f"Progress: {current}/{total} - {message}")
 
-def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, mock_mode=False, selected_categories=None):
-    """Process images in a separate thread"""
+def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, mock_mode=False, selected_categories=None, skip_analysis=False):
+    """Process images from a CSV file and update with categories"""
     global progress, stop_requested
     
-    progress["current"] = 0
-    progress["total"] = 0
-    progress["message"] = "Starting processing..."
-    progress["complete"] = False
-    progress["success"] = False
-    stop_requested = False
-    
     try:
-        # Initialize the OpenAI client
-        image_categorizer.client = image_categorizer.OpenAI(api_key=api_key)
-        image_categorizer.MOCK_MODE = mock_mode
-        image_categorizer.STOP_PROCESSING = False
-        
-        # Load the CSV file
-        df = pd.read_csv(input_file)
-        total_rows = len(df)
-        progress["total"] = total_rows - start_row
-        
-        # Check if we have selected categories to apply to all images
+        # Validate if selected_categories is None or empty
         has_selected_categories = selected_categories and len(selected_categories) > 0
-        if has_selected_categories:
-            logger.info(f"Will apply {len(selected_categories)} selected categories to all images")
-            progress["message"] = f"Applying {len(selected_categories)} selected categories to all images..."
+        logger.info(f"Processing with selected_categories: {has_selected_categories}, skip_analysis: {skip_analysis}")
         
-        # Process the images
-        for i, (_, row) in enumerate(df.iloc[start_row:].iterrows()):
-            if stop_requested or image_categorizer.STOP_PROCESSING:
+        # Check if file exists
+        if not os.path.exists(input_file):
+            progress["message"] = f"Input file does not exist: {input_file}"
+            progress["complete"] = True
+            return
+        
+        # Read the CSV file
+        df = pd.read_csv(input_file)
+        total_rows = len(df) - start_row
+        
+        if total_rows <= 0:
+            progress["message"] = "No rows to process or invalid start row."
+            progress["complete"] = True
+            return
+        
+        # Update progress
+        progress["total"] = total_rows
+        progress["current"] = 0
+        
+        # Validate Images column
+        if 'Images' not in df.columns:
+            progress["message"] = "CSV must have an 'Images' column."
+            progress["complete"] = True
+            return
+        
+        # Ensure Categories column exists
+        if 'Categories' not in df.columns:
+            df['Categories'] = ''
+        
+        # Initialize OpenAI client if needed
+        if not mock_mode and not skip_analysis:
+            image_categorizer.client = image_categorizer.OpenAI(api_key=api_key)
+        
+        # Process rows in batches
+        for batch_start in range(0, total_rows, batch_size):
+            if stop_requested:
                 progress["message"] = "Processing stopped by user."
-                break
+                progress["complete"] = True
+                return
+            
+            batch_end = min(batch_start + batch_size, total_rows)
+            progress["message"] = f"Processing rows {batch_start + 1} to {batch_end} of {total_rows}..."
+            
+            # Process each row in the batch
+            for current_row in range(batch_start, batch_end):
+                if stop_requested:
+                    break
                 
-            current_row = start_row + i
-            update_progress(i + 1, progress["total"], f"Processing row {current_row + 1}/{total_rows}")
-            
-            # Skip if no image URL
-            if pd.isna(row.get('Images')):
-                continue
-            
-            # Get existing categories if any
-            existing_categories = []
-            if pd.notna(row.get('Categories')) and row['Categories']:
-                existing_categories = [cat.strip() for cat in row['Categories'].split(',')]
-            
-            # If we have selected categories to apply to all images
-            if has_selected_categories:
-                # Combine existing categories with selected categories (avoiding duplicates)
-                combined_categories = list(set(existing_categories + selected_categories))
-                df.at[current_row + start_row, 'Categories'] = ', '.join(combined_categories)
-                logger.info(f"Applied selected categories to row {current_row + 1}")
+                # Update progress
+                progress["current"] = current_row + 1
+                row = df.iloc[current_row + start_row]
                 
-                # Save periodically
-                if i % 10 == 0 or i == len(df.iloc[start_row:]) - 1:
+                # Get existing categories if any
+                existing_categories = df.at[current_row + start_row, 'Categories']
+                if pd.isna(existing_categories):
+                    existing_categories = ''
+                
+                # If we have selected categories, apply them
+                if has_selected_categories:
+                    # Combine existing with selected categories
+                    combined_categories = set()
+                    
+                    # Add existing categories if any
+                    if existing_categories:
+                        existing_list = [c.strip() for c in existing_categories.split(',')]
+                        combined_categories.update(existing_list)
+                    
+                    # Add selected categories
+                    combined_categories.update(selected_categories)
+                    
+                    # Update the dataframe
+                    df.at[current_row + start_row, 'Categories'] = ', '.join(sorted(combined_categories))
+                    logger.info(f"Applied selected categories to row {current_row + 1}")
+                    
+                    # Save after each batch in case of interruption
                     df.to_csv(output_file, index=False)
                     logger.info(f"Saved progress to {output_file}")
                 
-                continue  # Skip API analysis if we're just applying selected categories
-            
-            # Only analyze with API if not already processed and no selected categories
-            if not existing_categories:
-                try:
-                    # Analyze the image
-                    if mock_mode:
-                        categories = image_categorizer.mock_analyze_image()
-                    else:
-                        categories = image_categorizer.analyze_image_with_gpt4v(row['Images'])
-                    
-                    # Post-process people categories using description if available
-                    description = row.get('Description', '')
-                    if categories and pd.notna(description):
-                        categories = image_categorizer.post_process_people_categories(categories, description)
-                    
-                    # Update the dataframe
-                    if categories:
-                        df.at[current_row + start_row, 'Categories'] = ', '.join(categories)
-                        logger.info(f"Updated categories for row {current_row + 1}: {categories}")
-                    
-                    # Save after each image in case of interruption
-                    df.to_csv(output_file, index=False)
-                    
-                    # Rate limiting
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    error_msg = f"Error processing row {current_row + 1}: {str(e)}"
-                    logger.error(error_msg)
-                    progress["message"] = error_msg
+                    # Continue with API analysis unless we're ONLY applying categories
+                    if skip_analysis:
+                        continue
+                
+                # Analyze with API if not already processed OR if we want to add AI categories to manual ones
+                if not existing_categories or not has_selected_categories or not skip_analysis:
+                    try:
+                        # Analyze the image
+                        if mock_mode:
+                            categories = image_categorizer.mock_analyze_image()
+                        else:
+                            categories = image_categorizer.analyze_image_with_gpt4v(row['Images'])
+                        
+                        # Post-process people categories using description if available
+                        description = row.get('Description', '')
+                        if categories and pd.notna(description):
+                            categories = image_categorizer.post_process_people_categories(categories, description)
+                        
+                        # Combine with existing categories if any
+                        combined_categories = set()
+                        if existing_categories:
+                            existing_list = [c.strip() for c in existing_categories.split(',')]
+                            combined_categories.update(existing_list)
+                        
+                        # Add AI-generated categories
+                        if categories:
+                            combined_categories.update(categories)
+                        
+                        # Update the dataframe
+                        if combined_categories:
+                            df.at[current_row + start_row, 'Categories'] = ', '.join(sorted(combined_categories))
+                            logger.info(f"Updated categories for row {current_row + 1}: {combined_categories}")
+                        
+                        # Save after each image in case of interruption
+                        df.to_csv(output_file, index=False)
+                        
+                        # Rate limiting
+                        time.sleep(1)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing row {current_row + 1}: {str(e)}"
+                        logger.error(error_msg)
+                        progress["message"] = error_msg
         
+        # Set completion message based on what was done        
         if has_selected_categories:
             progress["message"] = f"Successfully applied {len(selected_categories)} categories to all images!"
         else:
@@ -198,56 +212,67 @@ def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, 
         
         progress["success"] = True
         
+        # Final save to ensure all changes are saved
+        df.to_csv(output_file, index=False)
+        logger.info(f"Completed processing. Results saved to {output_file}")
+        
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
+        error_msg = f"Error during processing: {str(e)}"
         logger.error(error_msg)
         progress["message"] = error_msg
-        progress["success"] = False
-    finally:
-        progress["complete"] = True
+    
+    # Mark processing as complete
+    progress["complete"] = True
 
 def categorize_valid_categories():
     """Categorize the valid categories into groups for easier selection"""
+    # Get categories by group from the category manager
+    category_groups = category_manager.get_categories_by_group()
+    
+    # Map category manager groups to UI groups
     categories = {
-        'main': [],
-        'colors': [],
-        'people': [],
-        'orientation': [],
-        'mockups': [],
-        'copy_space': []
+        'main': category_groups.get('main_categories', []),
+        'colors': category_groups.get('colors', []),
+        'mockups': category_groups.get('mockups', []),
+        'orientation': category_groups.get('orientation', []),
+        'copy_space': category_groups.get('copy_space', [])
     }
     
-    for category in image_categorizer.VALID_CATEGORIES:
-        if category.startswith('Category >'):
-            categories['main'].append(category)
-        elif category.startswith('Colors >'):
-            categories['colors'].append(category)
-        elif category.startswith('PEOPLE >'):
-            categories['people'].append(category)
-        elif category.startswith('ORIENTATION >'):
-            categories['orientation'].append(category)
-        elif category.startswith('MOCKUPS >'):
-            categories['mockups'].append(category)
-        elif category.startswith('Copy Space >'):
-            categories['copy_space'].append(category)
-        else:
-            # Add to the category that makes most sense
-            if 'mockups' in category.lower():
-                categories['mockups'].append(category)
-            elif 'orientation' in category.lower():
-                categories['orientation'].append(category)
-            elif 'people' in category.lower():
-                categories['people'].append(category)
-            elif 'color' in category.lower():
-                categories['colors'].append(category)
-            elif 'space' in category.lower():
-                categories['copy_space'].append(category)
-            else:
-                categories['main'].append(category)
+    # Process people categories which have a more complex structure
+    people_categories = category_groups.get('people', [])
+    
+    # Create a 'people' category for the UI to use
+    categories['people'] = people_categories
+    
+    # Filter people categories into subgroups for more specific UI organization
+    categories['people_main'] = [
+        c for c in people_categories 
+        if '>' not in c[8:] or c.endswith('Any Age') or c.endswith('Any People') or c.endswith('Any Ethnicity')
+    ]
+    
+    categories['people_age'] = [
+        c for c in people_categories 
+        if c.startswith('PEOPLE > Any Age >')
+    ]
+    
+    categories['people_count'] = [
+        c for c in people_categories 
+        if c.startswith('PEOPLE > Any People >')
+    ]
+    
+    categories['people_ethnicity'] = [
+        c for c in people_categories 
+        if c.startswith('PEOPLE > Any Ethnicity >')
+    ]
     
     # Sort each category list alphabetically
     for key in categories:
         categories[key].sort()
+    
+    # Log loaded categories for debugging
+    logger.info(f"Loaded categories: {len(category_manager.get_all_categories())} total")
+    for group, cats in categories.items():
+        logger.info(f"  {group}: {len(cats)} categories")
     
     return categories
 
@@ -321,6 +346,7 @@ def process():
     batch_size = int(request.form.get('batch_size', 5))
     start_row = int(request.form.get('start_row', 0))
     mock_mode = 'mock_mode' in request.form
+    skip_analysis = 'skip_analysis' in request.form  # Capture this flag here instead of in the thread
     
     # Get selected categories (if any)
     selected_categories = []
@@ -330,7 +356,7 @@ def process():
             selected_categories = json.loads(selected_categories_json)
             logger.info(f"Selected categories to apply to all images: {selected_categories}")
         except Exception as e:
-            logger.error(f"Error parsing selected categories: {str(e)}")
+            logger.error(f"Error parsing selected categories: {str(e)}")    
     
     # Validate input file
     if not input_file or not os.path.exists(input_file):
@@ -364,7 +390,7 @@ def process():
     # Start processing in a separate thread
     processing_thread = threading.Thread(
         target=process_images,
-        args=(input_file, output_file, api_key, batch_size, start_row, mock_mode, selected_categories)
+        args=(input_file, output_file, api_key, batch_size, start_row, mock_mode, selected_categories, skip_analysis)
     )
     processing_thread.daemon = True
     processing_thread.start()
@@ -386,6 +412,51 @@ def get_progress():
     """Get the current progress"""
     global progress
     return jsonify(progress)
+
+@app.route('/reset', methods=['POST'])
+def reset_app():
+    """Reset the application state but preserve API key"""
+    global processing_thread, progress, stop_requested
+    
+    # Stop any running process
+    stop_requested = True
+    image_categorizer.STOP_PROCESSING = True
+    
+    # Wait for thread to finish if it's running
+    if processing_thread and processing_thread.is_alive():
+        # Give it a moment to stop gracefully
+        processing_thread.join(1.0)
+    
+    # Reset progress state
+    progress = {
+        "current": 0, 
+        "total": 0, 
+        "message": "Ready", 
+        "complete": False,
+        "success": False
+    }
+    
+    # Reset processing flags
+    stop_requested = False
+    image_categorizer.STOP_PROCESSING = False
+    
+    # Preserve API key but reset other config to defaults
+    config = load_config()
+    api_key = config.get('api_key', '')
+    
+    # Reset to defaults but keep API key
+    config = {
+        'api_key': api_key,
+        'last_input_file': '',
+        'last_output_file': '',
+        'batch_size': 5,
+        'start_row': 0,
+        'mock_mode': False
+    }
+    save_config(config)
+    
+    # Return success
+    return jsonify({"success": True, "message": "Application has been reset"})
 
 @app.route('/browse', methods=['GET'])
 def browse():

@@ -15,6 +15,8 @@
                 {% endif %}
                 
                 <form action="/process" method="post">
+                    <!-- Hidden fields for special flags -->
+                    <input type="hidden" name="skip_analysis" id="skip_analysis" value="0">
                     <div class="row">
                         <!-- Left Column: File Selection and Options -->
                         <div class="col-md-6">
@@ -163,9 +165,20 @@
                     
                     <div class="row mt-4">
                         <div class="col-md-12 text-center">
-                            <button type="submit" class="btn btn-primary btn-lg slide-in-up" id="start_btn"><i class="fas fa-play me-2"></i>Start Processing</button>
-                            <button type="button" class="btn btn-danger btn-lg" id="stop_btn" style="display: none;"><i class="fas fa-stop me-2"></i>Stop Processing</button>
-                            <button type="button" class="btn btn-success btn-lg" id="complete_btn" style="display: none;"><i class="fas fa-check me-2"></i>Complete</button>
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <button type="submit" class="btn btn-primary me-md-2" id="start_btn">
+                                    <i class="fas fa-play me-2"></i>Start Processing
+                                </button>
+                                <button type="button" class="btn btn-danger" id="stop_btn" style="display: none;">
+                                    <i class="fas fa-stop me-2"></i>Stop
+                                </button>
+                                <button type="button" class="btn btn-success" id="complete_btn" style="display: none;">
+                                    <i class="fas fa-check me-2"></i>Complete
+                                </button>
+                                <button type="button" class="btn btn-secondary" id="reset_btn">
+                                    <i class="fas fa-redo-alt me-2"></i>Reset
+                                </button>
+                            </div>
                         </div>
                     </div>
                     
@@ -187,39 +200,108 @@
 
 {% block scripts %}
 <script>
+    // Function to display flash messages
+    function flash(message, type = 'info') {
+        // Create the flash element
+        const flashId = 'flash-' + Date.now();
+        const alertClass = type === 'error' ? 'alert-danger' : 
+                           type === 'success' ? 'alert-success' : 
+                           type === 'warning' ? 'alert-warning' : 'alert-info';
+        
+        const $flash = $(`
+            <div id="${flashId}" class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                <i class="fas ${type === 'error' ? 'fa-exclamation-circle' : 
+                              type === 'success' ? 'fa-check-circle' : 
+                              type === 'warning' ? 'fa-exclamation-triangle' : 'fa-info-circle'} me-2"></i>
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `);
+        
+        // Add it to the top of the page
+        $('.row:first').before($flash);
+        
+        // Set up auto-dismiss
+        setTimeout(function() {
+            $flash.alert('close');
+        }, 5000); // Auto-dismiss after 5 seconds
+        
+        return $flash;
+    }
+    
     $(document).ready(function() {
-        // Browse buttons functionality with debounce to prevent multiple dialogs
+        // Global variables to prevent multiple dialog windows
         let browseInputInProgress = false;
-        $(document).off('click', '#browse_input_btn').on('click', '#browse_input_btn', function(e) {
+        let browseOutputInProgress = false;
+        let lastBrowseTime = 0;
+        
+        // Browse input button with robust protection against multiple dialogs
+        $('#browse_input_btn').off('click').on('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
             
-            if (browseInputInProgress) return;
+            // Three levels of protection against multiple dialogs:
+            // 1. Check if already in progress
+            // 2. Check if another browse operation is in progress
+            // 3. Check timing of last browse operation (must be > 2 seconds ago)
+            const now = Date.now();
+            if (browseInputInProgress || browseOutputInProgress || (now - lastBrowseTime < 2000)) {
+                console.log('Browse operation blocked - already in progress or too soon');
+                return false;
+            }
+            
             browseInputInProgress = true;
+            lastBrowseTime = now;
+            console.log('Starting input file browse operation');
+            
+            // Visual feedback that browse is in progress
+            const $btn = $(this);
+            const originalHtml = $btn.html();
+            $btn.html('<i class="fas fa-spinner fa-spin"></i>');
             
             $.get('/browse?type=input')
                 .done(function(data) {
                     if (data && data.path) {
                         $('#input_file').val(data.path);
+                        // Trigger change event to update dependent elements
+                        $('#input_file').trigger('change');
                     }
                 })
                 .fail(function() {
-                    console.error('Failed to browse for input directory');
+                    console.error('Failed to browse for input file');
                 })
                 .always(function() {
+                    // Reset button
+                    $btn.html(originalHtml);
+                    
+                    // Use a longer timeout to ensure the OS file dialog is fully closed
                     setTimeout(function() {
                         browseInputInProgress = false;
-                    }, 1000); // Prevent another click for 1 second
+                        console.log('Input file browse operation completed');
+                    }, 2000);
                 });
         });
         
-        let browseOutputInProgress = false;
-        $(document).off('click', '#browse_output_btn').on('click', '#browse_output_btn', function(e) {
+        // Browse output button with robust protection against multiple dialogs
+        $('#browse_output_btn').off('click').on('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
             
-            if (browseOutputInProgress) return;
+            // Same three levels of protection as above
+            const now = Date.now();
+            if (browseOutputInProgress || browseInputInProgress || (now - lastBrowseTime < 2000)) {
+                console.log('Browse operation blocked - already in progress or too soon');
+                return false;
+            }
+            
             browseOutputInProgress = true;
+            lastBrowseTime = now;
+            console.log('Starting output file browse operation');
+            
+            // Visual feedback that browse is in progress
+            const $btn = $(this);
+            const originalHtml = $btn.html();
+            $btn.html('<i class="fas fa-spinner fa-spin"></i>');
             
             $.get('/browse?type=output')
                 .done(function(data) {
@@ -228,12 +310,17 @@
                     }
                 })
                 .fail(function() {
-                    console.error('Failed to browse for output directory');
+                    console.error('Failed to browse for output file');
                 })
                 .always(function() {
+                    // Reset button
+                    $btn.html(originalHtml);
+                    
+                    // Use a longer timeout to ensure the OS file dialog is fully closed
                     setTimeout(function() {
                         browseOutputInProgress = false;
-                    }, 1000); // Prevent another click for 1 second
+                        console.log('Output file browse operation completed');
+                    }, 2000);
                 });
         });
         
@@ -244,10 +331,20 @@
             // Update the hidden input with the current selection before submitting
             const selectedCategories = updateSelectedCategories();
             
-            // Validate that we have at least one category selected
+            // Process based on whether categories are selected
             if (selectedCategories.length === 0) {
-                alert('Please select at least one category to process.');
-                return false;
+                const proceed = confirm('No categories selected. Do you want to proceed with AI-only categorization?');
+                if (!proceed) {
+                    return false;
+                }
+                // If proceeding with no categories, we're definitely using AI
+                $('#skip_analysis').val('0');
+                console.log('Processing with AI only (no categories selected)');
+            } else {
+                // Ask if they want to use AI in addition to selected categories
+                const useAI = confirm('Do you want to use AI to suggest additional categories?\n\nClick OK to use AI.\nClick Cancel to only apply your selected categories without AI.');
+                $('#skip_analysis').val(useAI ? '0' : '1');
+                console.log('Processing with ' + selectedCategories.length + ' categories, skip_analysis=' + $('#skip_analysis').val());
             }
             
             // Show processing state
@@ -443,6 +540,64 @@
             $('.progress-container').hide();
             $('#complete_btn').hide();
             $('#start_btn').show();
+        });
+        
+        // Reset button functionality
+        $('#reset_btn').click(function() {
+            // Confirm reset action
+            if (!confirm('Reset the application to default state? This will clear all inputs except your API key.')) {
+                return;
+            }
+            
+            // Visual feedback
+            const $btn = $(this);
+            const originalHtml = $btn.html();
+            $btn.html('<i class="fas fa-spinner fa-spin me-2"></i>Resetting...');
+            $btn.prop('disabled', true);
+            
+            // Send reset request
+            $.ajax({
+                url: '/reset',
+                type: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        // Reset form fields
+                        $('#input_file').val('');
+                        $('#output_file').val('');
+                        $('#batch_size').val('5');
+                        $('#start_row').val('0');
+                        $('#mock_mode').prop('checked', false);
+                        $('#skip_analysis').val('0');
+                        
+                        // Reset category selection
+                        $('.category-badge').removeClass('selected');
+                        updateSelectedCategories();
+                        
+                        // Reset progress UI
+                        $('.progress-container').hide();
+                        $('.progress-bar').css('width', '0%').attr('aria-valuenow', 0).text('0%');
+                        $('.progress-bar').removeClass('bg-success bg-danger').addClass('bg-primary');
+                        $('#progress_message').removeClass('text-success text-danger');
+                        
+                        // Reset buttons
+                        $('#complete_btn').hide();
+                        $('#stop_btn').hide();
+                        $('#start_btn').show();
+                        
+                        // Notify user
+                        flash('Application has been reset to default state', 'success');
+                    } else {
+                        flash('Reset failed: ' + (response.message || 'Unknown error'), 'error');
+                    }
+                },
+                error: function() {
+                    flash('Error communicating with server', 'error');
+                },
+                complete: function() {
+                    $btn.html(originalHtml);
+                    $btn.prop('disabled', false);
+                }
+            });
         });
         
         // Check progress periodically
