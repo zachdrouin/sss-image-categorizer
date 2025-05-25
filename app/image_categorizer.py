@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import sys
 import random
+from PIL import Image
 
 # Import from configuration module
 from config.settings import setup_logging
@@ -29,15 +30,36 @@ STOP_PROCESSING = False
 # Get valid categories from the category manager
 VALID_CATEGORIES = category_manager.get_all_categories()
 
-def encode_image(image_url: str) -> str:
-    """Download and encode image to base64"""
+def encode_image(image_url: str) -> tuple:
+    """Download and encode image to base64, also return the raw content for dimension analysis"""
     try:
         response = requests.get(image_url, timeout=10)
         response.raise_for_status()
-        return base64.b64encode(response.content).decode('utf-8')
+        return base64.b64encode(response.content).decode('utf-8'), response.content
     except Exception as e:
         logger.error(f"Error downloading image {image_url}: {str(e)}")
-        return None
+        return None, None
+
+def determine_orientation(image_content: bytes) -> str:
+    """Determine image orientation based on actual dimensions"""
+    if not image_content:
+        # Default to horizontal if we can't determine
+        return "ORIENTATION > Horizontal"
+    
+    try:
+        # Open the image using PIL
+        img = Image.open(BytesIO(image_content))
+        width, height = img.size
+        
+        # Determine orientation based on aspect ratio
+        if width >= height:
+            return "ORIENTATION > Horizontal"
+        else:
+            return "ORIENTATION > Vertical"
+    except Exception as e:
+        logger.error(f"Error determining image orientation: {str(e)}")
+        # Default to horizontal if there's an error
+        return "ORIENTATION > Horizontal"
 
 def mock_analyze_image() -> List[str]:
     """Generate mock categories for testing without API key"""
@@ -59,11 +81,15 @@ def mock_analyze_image() -> List[str]:
     time.sleep(0.5)
     return mock_categories
 
-def analyze_image_with_gpt4v(image_url: str) -> List[str]:
+def analyze_image_with_gpt4v(image_url: str, selected_categories: List[str] = None) -> List[str]:
     """Analyze image using GPT-4 Vision and return relevant categories"""
-    base64_image = encode_image(image_url)
+    base64_image, image_content = encode_image(image_url)
     if not base64_image:
         return []
+        
+    # Determine orientation based on actual image dimensions
+    orientation_category = determine_orientation(image_content)
+    logger.info(f"Determined orientation for {image_url}: {orientation_category}")
     
     categories_list = sorted(VALID_CATEGORIES)
     
@@ -74,6 +100,55 @@ def analyze_image_with_gpt4v(image_url: str) -> List[str]:
     color_categories = [cat for cat in categories_list if cat.startswith('Colors >')]
     main_content_categories = [cat for cat in categories_list if cat.startswith('Category >')]
     
+    # Process selected categories if provided
+    selected_constraints = ""
+    if selected_categories and len(selected_categories) > 0:
+        # Extract selected categories by type
+        selected_main = [c for c in selected_categories if c.startswith('Category >') and c in main_content_categories]
+        selected_colors = [c for c in selected_categories if c.startswith('Colors >') and c in color_categories]
+        selected_people = [c for c in selected_categories if c.startswith('PEOPLE >') and c in people_categories]
+        selected_ethnicity = [c for c in selected_people if 'Ethnicity >' in c]
+        selected_age = [c for c in selected_people if 'Age >' in c and not c.endswith('Any Age')]
+        
+        # For orientation, we'll use our determined value instead of any selected value
+        # But we'll keep track of any manual selection for reference
+        selected_orientation = [c for c in selected_categories if c.startswith('ORIENTATION >')]
+        if selected_orientation:
+            logger.info(f"Overriding manually selected orientation {selected_orientation[0]} with detected orientation {orientation_category}")
+        
+        selected_mockups = [c for c in selected_categories if c.startswith('MOCKUPS >')]
+        selected_copy_space = [c for c in selected_categories if c.startswith('Copy Space >')]
+        
+        # Build constraints for the prompt
+        constraints = []
+        if selected_main:
+            constraints.append(f"Content categories should include or be compatible with: {', '.join(selected_main)}")
+        if selected_colors:
+            constraints.append(f"Colors should include: {', '.join(selected_colors)}")
+        
+        # Tell the AI to use our detected orientation instead of guessing
+        constraints.append(f"Use exactly this orientation: {orientation_category}")
+        
+        if selected_mockups:
+            constraints.append(f"Mockup types should include: {', '.join(selected_mockups)}")
+        if selected_copy_space:
+            constraints.append(f"Copy space should be: {', '.join(selected_copy_space)}")
+        
+        # Special handling for people categories
+        if 'PEOPLE > No People' in selected_people:
+            constraints.append("If there are NO people in the image, confirm 'PEOPLE > No People' category. If any people are visible, ignore this constraint.")
+        elif selected_people:
+            people_constraints = []
+            if selected_ethnicity:
+                people_constraints.append(f"Ethnicity should be one of: {', '.join(selected_ethnicity)}")
+            if selected_age:
+                people_constraints.append(f"Age range should be one of: {', '.join(selected_age)}")
+            if people_constraints:
+                constraints.append("For people in the image: " + "; ".join(people_constraints))
+        
+        if constraints:
+            selected_constraints = "\nIMPORTANT CONSTRAINTS:\n" + "\n".join([f"- {c}" for c in constraints]) + "\n"
+    
     prompt = f"""
     Analyze this image and return ONLY the relevant categories from the following list in a comma-separated format.
     Be thorough but only include categories that are clearly applicable.
@@ -82,6 +157,7 @@ def analyze_image_with_gpt4v(image_url: str) -> List[str]:
     1. Only return categories from the provided list
     2. Format as comma-separated values
     3. Be specific and precise in your analysis
+    4. If there are NO people in the image, do not include any people-related categories except 'PEOPLE > No People'{selected_constraints}
     
     For CONTENT CATEGORIES, select the most relevant ones (can select multiple):
     {', '.join(main_content_categories)}
@@ -145,6 +221,18 @@ def analyze_image_with_gpt4v(image_url: str) -> List[str]:
         categories = [c.strip() for c in response_text.split(',')]
         valid_categories = [c for c in categories if c in VALID_CATEGORIES]
         
+        # If we have selected categories, harmonize with AI results
+        if selected_categories and len(selected_categories) > 0:
+            # Add our detected orientation to the valid categories
+            if orientation_category not in valid_categories:
+                valid_categories.append(orientation_category)
+                
+            valid_categories = harmonize_categories(valid_categories, selected_categories)
+            
+        # Make sure our detected orientation is in the final categories
+        if orientation_category not in valid_categories:
+            valid_categories.append(orientation_category)
+        
         # Ensure we have at least one of each main category type
         main_categories = {
             'Category >': False,
@@ -196,6 +284,108 @@ def analyze_image_with_gpt4v(image_url: str) -> List[str]:
     except Exception as e:
         logger.error(f"Error analyzing image {image_url}: {str(e)}")
         return []
+
+def harmonize_categories(ai_categories: List[str], selected_categories: List[str]) -> List[str]:
+    """
+    Harmonize AI-generated categories with manually selected categories to ensure consistency
+    and resolve conflicts according to these rules:
+    1. If AI detects no people but people categories were selected, respect AI's detection
+    2. For orientation, mockups, and copy space, prefer manually selected categories
+    3. For content and colors, combine both sets
+    4. For people subcategories (age, ethnicity), use manually selected if provided
+    """
+    result_categories = set()
+    
+    # Check if AI detected no people
+    ai_no_people = 'PEOPLE > No People' in ai_categories
+    
+    # Extract categories by type
+    ai_main = [c for c in ai_categories if c.startswith('Category >')]
+    ai_colors = [c for c in ai_categories if c.startswith('Colors >')]
+    ai_orientation = [c for c in ai_categories if c.startswith('ORIENTATION >')]
+    ai_mockups = [c for c in ai_categories if c.startswith('MOCKUPS >')]
+    ai_copy_space = [c for c in ai_categories if c.startswith('Copy Space >')]
+    ai_people = [c for c in ai_categories if c.startswith('PEOPLE >')]
+    
+    selected_main = [c for c in selected_categories if c.startswith('Category >')]
+    selected_colors = [c for c in selected_categories if c.startswith('Colors >')]
+    selected_orientation = [c for c in selected_categories if c.startswith('ORIENTATION >')]
+    selected_mockups = [c for c in selected_categories if c.startswith('MOCKUPS >')]
+    selected_copy_space = [c for c in selected_categories if c.startswith('Copy Space >')]
+    selected_people = [c for c in selected_categories if c.startswith('PEOPLE >')]
+    
+    # Rule 1: If AI says no people, respect that regardless of manual selection
+    if ai_no_people:
+        # Add only the 'No People' category and remove any other people categories
+        result_categories.add('PEOPLE > No People')
+        
+        # Remove any other people categories that might have been manually selected
+        result_categories = {cat for cat in result_categories if not (cat.startswith('PEOPLE >') and cat != 'PEOPLE > No People')}
+    else:
+        # For people categories, if AI detected people, use manual selections if available
+        if ai_people and selected_people and 'PEOPLE > No People' not in selected_people:
+            # Extract specific people subcategories
+            selected_ethnicity = [c for c in selected_people if 'Ethnicity >' in c]
+            selected_age = [c for c in selected_people if 'Age >' in c and not c.endswith('Any Age')]
+            selected_count = [c for c in selected_people if '> 2 People' in c or '> 3+ People' in c]
+            selected_faceless = [c for c in selected_people if 'Faceless' in c]
+            
+            # Add the basic 'Any People' category if needed
+            if not any('> No People' in c for c in ai_people):
+                result_categories.add('PEOPLE > Any People')
+            
+            # Add specific subcategories from manual selection if available, otherwise from AI
+            if selected_ethnicity:
+                result_categories.update(selected_ethnicity)
+            else:
+                result_categories.update([c for c in ai_people if 'Ethnicity >' in c])
+                
+            if selected_age:
+                result_categories.update(selected_age)
+            else:
+                result_categories.update([c for c in ai_people if 'Age >' in c and not c.endswith('Any Age')])
+                
+            if selected_count:
+                result_categories.update(selected_count)
+            else:
+                result_categories.update([c for c in ai_people if '> 2 People' in c or '> 3+ People' in c])
+                
+            if selected_faceless:
+                result_categories.update(selected_faceless)
+            elif any('Faceless' in c for c in ai_people):
+                result_categories.add('PEOPLE > Faceless')
+        else:
+            # If no manual people categories, use AI's people categories
+            result_categories.update(ai_people)
+    
+    # Rule 2: For orientation, always use the detected orientation from image dimensions
+    # Remove any existing orientation categories
+    result_categories = {cat for cat in result_categories if not cat.startswith('ORIENTATION >')}
+    
+    # Add the detected orientation (this was passed in via ai_categories)
+    orientation_categories = [cat for cat in ai_categories if cat.startswith('ORIENTATION >')]
+    if orientation_categories:
+        result_categories.add(orientation_categories[0])
+        
+    # For mockups and copy space, prefer manual selection
+    if selected_mockups:
+        result_categories.update(selected_mockups)
+    else:
+        result_categories.update(ai_mockups)
+        
+    if selected_copy_space:
+        result_categories.update(selected_copy_space)
+    else:
+        result_categories.update(ai_copy_space)
+    
+    # Rule 3: For content and colors, combine both sets
+    result_categories.update(ai_main)
+    result_categories.update(selected_main)
+    result_categories.update(ai_colors)
+    result_categories.update(selected_colors)
+    
+    return list(result_categories)
+
 
 def post_process_people_categories(categories: List[str], description: str = None) -> List[str]:
     """

@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import threading
+import time
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
@@ -152,26 +153,39 @@ def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, 
                     # Add selected categories
                     combined_categories.update(selected_categories)
                     
-                    # Update the dataframe
-                    df.at[current_row + start_row, 'Categories'] = ', '.join(sorted(combined_categories))
-                    logger.info(f"Applied selected categories to row {current_row + 1}")
-                    
-                    # Save after each batch in case of interruption
-                    df.to_csv(output_file, index=False)
-                    logger.info(f"Saved progress to {output_file}")
-                
-                    # Continue with API analysis unless we're ONLY applying categories
+                    # If we're using the combined approach (not skipping analysis), we'll continue to AI analysis
+                    # Otherwise, update the dataframe with just the manual categories
                     if skip_analysis:
+                        # Update the dataframe with just manual categories
+                        df.at[current_row + start_row, 'Categories'] = ', '.join(sorted(combined_categories))
+                        logger.info(f"Applied ONLY manual categories to image {current_row + 1} of {total_rows} (skipping AI analysis)")
+                        
+                        # Save after each batch in case of interruption
+                        df.to_csv(output_file, index=False)
+                        logger.info(f"Saved progress to {output_file}")
                         continue
+                    else:
+                        # We'll store these for the AI to use as constraints
+                        # The actual update will happen after AI analysis
+                        logger.info(f"Using SMART COMBINED approach for image {current_row + 1} of {total_rows} with {len(selected_categories)} manual categories")
                 
-                # Analyze with API if not already processed OR if we want to add AI categories to manual ones
-                if not existing_categories or not has_selected_categories or not skip_analysis:
+                # Analyze with API if:
+                # 1. There are no existing categories, OR
+                # 2. We're using the SMART COMBINED approach (not skipping analysis)
+                if not existing_categories or not skip_analysis:
                     try:
                         # Analyze the image
                         if mock_mode:
+                            logger.info(f"Using mock analysis for image {current_row + 1} of {total_rows}")
                             categories = image_categorizer.mock_analyze_image()
                         else:
-                            categories = image_categorizer.analyze_image_with_gpt4v(row['Images'])
+                            # Pass selected categories to the analyze function if we have them
+                            if has_selected_categories:
+                                logger.info(f"Analyzing image {current_row + 1} of {total_rows} with GPT-4V using {len(selected_categories)} manual categories as constraints")
+                                categories = image_categorizer.analyze_image_with_gpt4v(row['Images'], selected_categories)
+                            else:
+                                logger.info(f"Analyzing image {current_row + 1} of {total_rows} with GPT-4V without constraints")
+                                categories = image_categorizer.analyze_image_with_gpt4v(row['Images'])
                         
                         # Post-process people categories using description if available
                         description = row.get('Description', '')
@@ -191,7 +205,13 @@ def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, 
                         # Update the dataframe
                         if combined_categories:
                             df.at[current_row + start_row, 'Categories'] = ', '.join(sorted(combined_categories))
-                            logger.info(f"Updated categories for row {current_row + 1}: {combined_categories}")
+                            if has_selected_categories and not skip_analysis:
+                                logger.info(f"SMART COMBINED result for image {current_row + 1} of {total_rows}: {len(combined_categories)} categories applied")
+                                logger.info(f"Manual categories: {selected_categories}")
+                                logger.info(f"AI categories: {categories}")
+                                logger.info(f"Combined result: {combined_categories}")
+                            else:
+                                logger.info(f"Updated categories for row {current_row + 1}: {combined_categories}")
                         
                         # Save after each image in case of interruption
                         df.to_csv(output_file, index=False)
@@ -206,9 +226,9 @@ def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, 
         
         # Set completion message based on what was done        
         if has_selected_categories:
-            progress["message"] = f"Successfully applied {len(selected_categories)} categories to all images!"
+            progress["message"] = f"Successfully processed {total_rows} images with {len(selected_categories)} manual categories!"
         else:
-            progress["message"] = "Processing completed successfully!"
+            progress["message"] = f"Successfully processed {total_rows} images with AI categorization!"
         
         progress["success"] = True
         
@@ -346,7 +366,21 @@ def process():
     batch_size = int(request.form.get('batch_size', 5))
     start_row = int(request.form.get('start_row', 0))
     mock_mode = 'mock_mode' in request.form
-    skip_analysis = 'skip_analysis' in request.form  # Capture this flag here instead of in the thread
+    
+    # Check if we should use the combined approach
+    use_combined_approach = 'use_combined_approach' in request.form
+    logger.info(f"use_combined_approach: {use_combined_approach}")
+    
+    # Set skip_analysis based on the combined approach checkbox
+    # If use_combined_approach is True, we don't want to skip analysis
+    # If use_combined_approach is False, we do want to skip analysis
+    skip_analysis = not use_combined_approach
+    logger.info(f"skip_analysis: {skip_analysis}")
+    
+    # For backward compatibility, also check the hidden skip_analysis field
+    if 'skip_analysis' in request.form and request.form.get('skip_analysis') == '1':
+        skip_analysis = True
+        logger.info("Overriding with skip_analysis=1 from hidden field")
     
     # Get selected categories (if any)
     selected_categories = []

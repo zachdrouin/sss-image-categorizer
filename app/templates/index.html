@@ -63,6 +63,14 @@
                                             <i class="fas fa-vial me-2"></i>Mock Mode (No API calls)
                                         </label>
                                     </div>
+                                    
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="use_combined_approach" name="use_combined_approach" checked>
+                                        <label class="form-check-label" for="use_combined_approach">
+                                            <i class="fas fa-magic me-2"></i><strong>Use SMART COMBINED Approach</strong>
+                                        </label>
+                                        <div class="form-text">When selected, AI will analyze images while respecting your manual category selections. Uncheck to apply only your selected categories without AI.</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -331,6 +339,9 @@
             // Update the hidden input with the current selection before submitting
             const selectedCategories = updateSelectedCategories();
             
+            // Check if the combined approach checkbox is checked
+            const useCombinedApproach = $('#use_combined_approach').is(':checked');
+            
             // Process based on whether categories are selected
             if (selectedCategories.length === 0) {
                 const proceed = confirm('No categories selected. Do you want to proceed with AI-only categorization?');
@@ -341,10 +352,15 @@
                 $('#skip_analysis').val('0');
                 console.log('Processing with AI only (no categories selected)');
             } else {
-                // Ask if they want to use AI in addition to selected categories
-                const useAI = confirm('Do you want to use AI to suggest additional categories?\n\nClick OK to use AI.\nClick Cancel to only apply your selected categories without AI.');
-                $('#skip_analysis').val(useAI ? '0' : '1');
-                console.log('Processing with ' + selectedCategories.length + ' categories, skip_analysis=' + $('#skip_analysis').val());
+                // Set the skip_analysis flag based on the checkbox
+                // '0' means use AI, '1' means skip AI
+                $('#skip_analysis').val(useCombinedApproach ? '0' : '1');
+                
+                if (useCombinedApproach) {
+                    console.log('Processing with SMART COMBINED approach: ' + selectedCategories.length + ' manual categories + AI analysis');
+                } else {
+                    console.log('Processing with ' + selectedCategories.length + ' manual categories only, no AI');
+                }
             }
             
             // Show processing state
