@@ -9,7 +9,9 @@ common categories to all images for faster processing.
 
 import os
 import sys
+
 import json
+import logging
 import threading
 import time
 import pandas as pd
@@ -34,6 +36,9 @@ try:
 except ImportError:
     # Fall back to direct import for when run as a script
     import image_categorizer
+
+# Import our fixed OpenAI client
+from app.openai_fixed import OpenAI
 
 # Configure logging
 logger = setup_logging('web_categorizer')
@@ -79,6 +84,19 @@ def process_images(input_file, output_file, api_key, batch_size=5, start_row=0, 
     global progress, stop_requested
     
     try:
+        # Initialize the OpenAI client using our wrapper
+        try:
+            # Create the OpenAI client with our wrapper
+            client = OpenAI(api_key=api_key)
+            image_categorizer.client = client
+            logger.info("OpenAI client initialized successfully for image processing")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+            progress["message"] = f"Error: Failed to initialize OpenAI client - {str(e)}"
+            progress["complete"] = True
+            progress["success"] = False
+            return
+        
         # Validate if selected_categories is None or empty
         has_selected_categories = selected_categories and len(selected_categories) > 0
         logger.info(f"Processing with selected_categories: {has_selected_categories}, skip_analysis: {skip_analysis}")

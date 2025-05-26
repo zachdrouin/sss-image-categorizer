@@ -1,17 +1,27 @@
+#!/usr/bin/env python3
+"""
+Image Categorizer using GPT-4 Vision
+
+This script processes a CSV file with image URLs and adds categories using GPT-4 Vision.
+It's designed to help categorize product images for e-commerce platforms like WooCommerce.
+"""
+
 import os
+import sys
+import json
+import time
+import base64
+import logging
+import argparse
 import pandas as pd
 import requests
-import logging
-from openai import OpenAI
-from io import BytesIO
-import base64
-import time
-from typing import List, Set
-import json
-from pathlib import Path
-import sys
+import threading
 import random
 from PIL import Image
+from app.openai_fixed import OpenAI
+from io import BytesIO
+from typing import List, Set
+from pathlib import Path
 
 # Import from configuration module
 from config.settings import setup_logging
@@ -190,31 +200,53 @@ def analyze_image_with_gpt4v(image_url: str, selected_categories: List[str] = No
         if MOCK_MODE:
             logger.info(f"MOCK MODE: Generating mock categories for {image_url}")
             return mock_analyze_image()
-            
+        
+        # Check if client is properly initialized
+        global client
+        if client is None:
+            try:
+                # Get API key from environment
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    logger.error("No OpenAI API key available. Set OPENAI_API_KEY environment variable.")
+                    return []
+                
+                # Initialize client using our OpenAI wrapper
+                logger.info("Initializing OpenAI client for image analysis...")
+                client = OpenAI(api_key=api_key)
+                logger.info("OpenAI client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+                return []
+        
         # Real API call
-        response = client.chat.completions.create(
-            model="gpt-4o",  # Current vision-capable model as of May 2024
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"  # Higher detail for better analysis
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",  # Current vision-capable model as of May 2024
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}",
+                                    "detail": "high"  # Higher detail for better analysis
+                                }
                             }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1000,
-            temperature=0.1,  # Lower temperature for more consistent results
-            top_p=0.9,
-            frequency_penalty=0.1,
-            presence_penalty=0.1
-        )
+                        ]
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.1,  # Lower temperature for more consistent results
+                top_p=0.9,
+                frequency_penalty=0.1,
+                presence_penalty=0.1
+            )
+        except Exception as e:
+            logger.error(f"Error during OpenAI API call: {str(e)}")
+            return []
         
         # Parse response and validate categories
         response_text = response.choices[0].message.content
@@ -477,17 +509,22 @@ def process_csv_with_progress(input_file: str, output_file: str, start_row: int 
         
         # Configure mock mode and API key
         MOCK_MODE = mock_mode
-        if not mock_mode and api_key:
-            client = OpenAI(api_key=api_key)
-            logger.info("OpenAI client initialized with provided API key")
-        elif not mock_mode:
-            api_key = os.getenv('OPENAI_API_KEY')
+        
+        # Initialize the OpenAI client if not already done
+        if client is None:
             if not api_key:
-                raise ValueError("No OpenAI API key provided. Use --api-key or set OPENAI_API_KEY environment variable.")
-            client = OpenAI(api_key=api_key)
-            logger.info("OpenAI client initialized with environment API key")
-        else:
-            logger.info("Running in MOCK MODE - no API calls will be made")
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("No OpenAI API key provided. Use --api-key or set OPENAI_API_KEY environment variable.")
+            
+            # Use the patched OpenAI client
+            try:
+                logger.info("Initializing OpenAI client...")
+                client = OpenAI(api_key=api_key)
+                logger.info("OpenAI client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+                raise
         
         # Ensure output directory exists
         output_path = Path(output_file)
@@ -586,9 +623,14 @@ def main():
         logger.info("Alternatively, use --mock to run in mock mode without an API key.")
         sys.exit(1)
     else:
-        # Initialize the OpenAI client with the API key
-        client = OpenAI(api_key=api_key)
-        logger.info("OpenAI client initialized with API key")
+        # Initialize the OpenAI client using the patched OpenAI client
+        try:
+            logger.info("Initializing OpenAI client...")
+            client = OpenAI(api_key=api_key)
+            logger.info("OpenAI client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+            sys.exit(1)
     
     # Process the CSV file
     logger.info("Starting image category processing...")
