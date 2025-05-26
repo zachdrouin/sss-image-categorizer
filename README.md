@@ -4,11 +4,12 @@ A tool for automatically categorizing images for Styled Stock Society using Open
 
 Builds a standalone MacOS application that Elle can use locally without complicated installs. 
 
-Created with curiousity (and windsurf) in a weekend :)
+Created with curiousity (and windsurf) in a weekend 
+
+:)
 
 ## Features
 
-- 
 - Analyze images with AI to automatically suggest appropriate categories
 - Manually select categories to apply to all images
 - Smart integration of manual and AI categorization
