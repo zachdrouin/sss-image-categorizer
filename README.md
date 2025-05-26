@@ -1,9 +1,14 @@
 # Image Categorizer
 
-A tool for automatically categorizing images using OpenAI's GPT-4 Vision API. This application helps you quickly add relevant categories to your product images for e-commerce platforms like WooCommerce.
+A tool for automatically categorizing images for Styled Stock Society using OpenAI's GPT-4 Vision API. This application helps the Styled Stock Society Team quickly add relevant categories to product images for import into WooCommerce.
+
+Builds a standalone MacOS application that Elle can use locally without complicated installs. 
+
+Created with curiousity (and windsurf) in a weekend :)
 
 ## Features
 
+- 
 - Analyze images with AI to automatically suggest appropriate categories
 - Manually select categories to apply to all images
 - Smart integration of manual and AI categorization
@@ -12,7 +17,6 @@ A tool for automatically categorizing images using OpenAI's GPT-4 Vision API. Th
 - Process images in batches to optimize API usage
 - Export categorized images as a CSV file ready for import
 - User-friendly web interface with progress tracking
-- Reset functionality to clear the application state while preserving settings
 
 ## Installation
 
@@ -184,5 +188,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgements
 
 - OpenAI for the GPT-4 Vision API
-- Style Stock Society for the application concept and design
-- Zach Drouin for development
+- Style Stock Society and Elle Drouin for the application concept and design
+- Windsurf&co for development
