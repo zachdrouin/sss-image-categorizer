@@ -8,6 +8,8 @@ venv/
 ENV/
 env/
 .env
+.coverage
+.pytest_cache/
 
 # Distribution / packaging
 dist/
